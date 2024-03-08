@@ -1,8 +1,12 @@
 import time
+import math
 
 #1
 s = [int(x) for x in input().split()]
 print("sum:", sum(s))
+
+result = math.prod(s)
+print("product:", result)
 print("-----")
 
 #2

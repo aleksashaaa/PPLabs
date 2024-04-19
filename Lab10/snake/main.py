@@ -1,0 +1,204 @@
+import pygame, sys
+from color_palette import *
+import random, time
+import psycopg2
+
+global LVL
+LVL = 1
+SCORE = 0 #number of food
+
+conn = psycopg2.connect(
+    host='localhost', 
+    dbname='snake', 
+    user='postgres', 
+    password='hS36a1L2'
+    )
+
+# Create a cursor to work with the database
+cur = conn.cursor()
+
+cur.execute("""CREATE TABLE IF NOT EXISTS userdb (
+    name VARCHAR(255) PRIMARY KEY,
+    lvl INT,
+    score INT
+);
+""")
+
+def new(user):
+    cur.execute(f"""INSERT INTO userdb VALUES('{user}', 1, 0);""")
+    LVL = 1
+
+def update(curuser):
+    cur.execute(f"""SELECT * FROM userdb WHERE name = '{curuser}'""")
+    data = cur.fetchone()
+    cur.execute(f"""UPDATE userdb SET lvl = {max(data[1], LVL)}, score = {max(data[2], SCORE)} WHERE name = '{curuser}'
+    """)
+    conn.commit()
+
+print("Enter your name:")
+user = input()
+cur.execute(f"""SELECT count(*) FROM userdb WHERE name = '{user}'""")
+if cur.fetchone()[0] == 0:
+    new(user)
+    conn.commit()
+else:
+    cur.execute(f"""SELECT * FROM userdb WHERE name = '{user}'""")
+    data = cur.fetchone()
+    print("User's max lvl: {}".format(data[1]))
+    print("User's max score: {}".format(data[2]))
+    LVL = data[1]
+    SCORE = data[2]
+
+
+pygame.init()
+
+WIDTH = 600
+HEIGHT = 600
+
+screen_border = pygame.Rect(0, 0, WIDTH, HEIGHT) 
+
+now = pygame.time.get_ticks()
+
+CELL = 30
+
+#fonts
+font = pygame.font.SysFont("Verdana", 60)
+font_small = pygame.font.SysFont("Verdana", 20)
+game_over = font.render("Game Over", True, colorBLACK)
+
+#screen background
+def draw_grid():
+    for i in range(HEIGHT // 2):
+        for j in range(WIDTH // 2):
+            pygame.draw.rect(screen, colorGRAY, (i * CELL, j * CELL, CELL, CELL), 1)
+
+def draw_grid_chess():
+    colors = [colorWHITE, colorGRAY]
+    for i in range(HEIGHT // 2):
+        for j in range(WIDTH // 2):
+            pygame.draw.rect(screen, colors[(i + j) % 2], (i * CELL, j * CELL, CELL, CELL))
+
+screen = pygame.display.set_mode((HEIGHT, WIDTH))
+
+class Point:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    def __str__(self):
+        return f"{self.x}, {self.y}"
+
+class Snake:
+    def __init__(self):
+        self.body = [Point(10, 11), Point(10, 12), Point(10, 13)] #input position
+        self.dx = 1
+        self.dy = 0
+        self.rect = pygame.draw.rect(screen, colorRED, (0, 0, CELL, CELL))
+
+    def move(self):
+        for i in range(len(self.body) - 1, 0, -1):
+            self.body[i].x = self.body[i - 1].x
+            self.body[i].y = self.body[i - 1].y
+        self.body[0].x += self.dx
+        self.body[0].y += self.dy
+
+    def draw(self):
+        head = self.body[0]
+        self.rect = pygame.draw.rect(screen, colorRED, (head.x * CELL, head.y * CELL, CELL, CELL))
+        pygame.draw.rect(screen, colorRED, (head.x * CELL, head.y * CELL, CELL, CELL))
+        for segment in self.body[1:]:
+            pygame.draw.rect(screen, colorYELLOW, (segment.x * CELL, segment.y * CELL, CELL, CELL))
+
+    def check_borders(self): #if snake goes out of borders, game over
+        if not pygame.Rect.contains(screen_border, self.rect) :                  
+            screen.fill(colorRED)
+            screen.blit(game_over, (120, 250))
+            pygame.display.update()
+            time.sleep(0.2)
+            pygame.quit()
+            sys.exit()      
+
+    def check_collision(self, food):
+        global SCORE, now, LVL
+        head = self.body[0]
+        if head.x == food.pos.x and head.y == food.pos.y:
+            print("Got food!")
+            LVL += 1
+            self.body.append(Point(head.x, head.y))
+            SCORE += food.weight #addind the weight of food
+            food.change_pos(snake)
+            now = pygame.time.get_ticks()
+
+
+class Food:
+    def __init__(self):
+        self.pos = Point(9, 9) #input position
+        self.weight = random.randint(1, 3)
+
+    def change_pos(self, snake):
+        self.weight = random.randint(1, 3)
+        self.pos = Point(random.randint(1, 18), random.randint(1, 18)) #random position
+        for i in range(len(snake.body)): #check if the food in the same position as the snake
+            if self.pos.x == snake.body[i].x or self.pos.y == snake.body[i].y:
+                self.pos = Point(random.randint(1, 18), random.randint(1, 18))
+
+    def draw(self):
+        if self.weight == 1:
+            color_food = colorGREEN
+        elif self.weight == 2:
+            color_food = colorBLUE
+        else:
+            color_food = colorPINK
+        pygame.draw.rect(screen, color_food, (self.pos.x * CELL, self.pos.y * CELL, CELL, CELL))
+
+
+clock = pygame.time.Clock()
+
+snake = Snake()
+food = Food()
+
+
+done = False
+while not done:
+    FPS = 1.1 * LVL #when snake receives food, speed increases
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            done = True
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_RIGHT:
+                snake.dx = 1
+                snake.dy = 0
+            elif event.key == pygame.K_LEFT:
+                snake.dx = -1
+                snake.dy = 0
+            elif event.key == pygame.K_DOWN:
+                snake.dx = 0
+                snake.dy = 1
+            elif event.key == pygame.K_UP:
+                snake.dx = 0
+                snake.dy = -1
+            if event.key == pygame.K_SPACE:
+                update(user)
+
+    draw_grid_chess()
+
+    time_difference = pygame.time.get_ticks() - now
+    if time_difference >= 10000: #10 sec
+            now = pygame.time.get_ticks()
+            food.change_pos(snake)
+            food.draw()
+
+    snake.move()
+    snake.check_borders()
+    snake.check_collision(food)
+
+    snake.draw()
+    food.draw()
+    # score and lvl output
+    lvls = font_small.render(f"LVL{str(LVL)}", True, colorBLACK)
+    screen.blit(lvls, (10, 10))
+    score = font_small.render(f"SCORE: {str(SCORE)}", True, colorBLACK)
+    screen.blit(score, (480, 10))
+
+    pygame.display.flip()
+    clock.tick(FPS)
